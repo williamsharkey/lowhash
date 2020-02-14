@@ -1,5 +1,5 @@
 # lowhash
-search for (readable) strings which produce low sha256 hashes, which are less than or equal to 256 bytes in length.
+search for (readable) strings which produce low sha256 hashes.
 
 # installation
 
@@ -37,4 +37,6 @@ search for (readable) strings which produce low sha256 hashes, which are less th
 
 ## note
 
-feel free to build your own faster search program. If you find a good string you can still post it to https://lowhash.com, programatically via a post request or manually by pasting it into the input box at the website
+feel free to build your own faster search program. If you find a good string you can still post it to https://lowhash.com, programatically via a post request or manually by pasting it into the input box at the website.
+
+https://lowhash.com is currently interested in collecting strings which are relatively short, 256 characters or less.
