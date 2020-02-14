@@ -2,6 +2,7 @@ package main
 
 import (
 	nativeSha "crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -28,12 +29,13 @@ func main() {
 		postfix = os.Args[2]
 	}
 
-	fmt.Println()
+	fmt.Println(" ")
 	fmt.Println(" +-----------+")
 	fmt.Println(" |  lowhash  |")
 	fmt.Println(" +-----------+")
 	fmt.Println()
 	fmt.Println(" https://lowhash.com")
+	fmt.Println()
 	fmt.Println()
 	fmt.Printf("prefix: %q\n", prefix)
 	fmt.Printf("postfix: %q\n", postfix)
@@ -42,38 +44,58 @@ func main() {
 	start := time.Now()
 
 	// prime the program with a cutoff
-	atleast, err := post("a new paper suffers as if the thoughts", "")
+	atleast, err := post("a new paper suffers as if the thoughts", []byte{0xff})
 
-	const batch = 4000000
+	const batch = 400000 * 2 // about every two seconds, modulo how fast your computer is
 
-	for i := 1; true; i++ {
-		s := randSentence(prefix, postfix)
+	initWordsByte()
+	//sx,n := randSentenceFast([]byte(prefix),[]byte(postfix))
+	//fmt.Println(string(sx[:n]))
+	//return
+	for i := 0; true; i++ {
 
-		hash := hash(s)
-
-		if hash < atleast {
-			atleast, err = post(s, atleast)
+		//s := randSentence(prefix, postfix)
+		s, n := randSentenceFast([]byte(prefix), []byte(postfix))
+		//s:="fixed"
+		hash := hashFast(s[:n])
+		//hash := hash(s)
+		if leftLess(hash, atleast) {
+			atleast, err = post(string(s[:n]), atleast)
 			if err != nil {
 				fmt.Println("Quitting, err " + err.Error())
 				return
 			}
 		}
 
-		if i%batch == 0 {
+		if i > batch {
+
 			hashesPerSecond := float64(batch) / (float64(time.Since(start).Nanoseconds()) / float64(1000000000))
 			start = time.Now()
 			fmt.Printf("%dk hashes per second \n", int64(hashesPerSecond/1000))
+
+			// avoid an int overflow
+			i = 0
 		}
-
 	}
+}
 
+func leftLess(a, b []byte) bool {
+	for i := 0; i < len(a); i++ {
+		if a[i] < b[i] {
+			return true
+		} else if a[i] > b[i] {
+			return false
+
+		}
+	}
+	return false
 }
 
 var cutoffRegex, _ = regexp.Compile(".*cutoff: (.*)")
 var msgRegex, _ = regexp.Compile(".*msg: (.*)")
 var rankRegex, _ = regexp.Compile(".*rank: (.*)")
 
-func post(s string, atleast string) (atleastOut string, fail error) {
+func post(s string, atleast []byte) (atleastOut []byte, fail error) {
 	atleastOut = atleast
 	form := url.Values{}
 	form.Add("msg", s)
@@ -110,17 +132,20 @@ func post(s string, atleast string) (atleastOut string, fail error) {
 			}
 			bodyString := string(bodyBytes)
 			if strings.HasPrefix(bodyString, "\nhash does not rank") {
-				atleastOut = cutoffRegex.FindStringSubmatch(bodyString)[1]
-				fmt.Println("Set cutoff to " + atleastOut[0:8] + " " + atleastOut[8:16])
+				a := cutoffRegex.FindStringSubmatch(bodyString)[1]
+				atleastOut = stringToHexBytes(a)
+				fmt.Println("Set cutoff to " + a[0:8] + " " + a[8:16])
 			} else if strings.HasPrefix(bodyString, "\nrank: ") {
-				atleastOut = cutoffRegex.FindStringSubmatch(bodyString)[1]
+				b := cutoffRegex.FindStringSubmatch(bodyString)[1]
+				atleastOut = stringToHexBytes(b)
 				rank := rankRegex.FindStringSubmatch(bodyString)[1]
 				msg := msgRegex.FindStringSubmatch(bodyString)[1]
 				fmt.Println("Excellent! You placed " + rank + " with: \"" + msg + "\"")
-				fmt.Println(" Update cutoff to " + atleastOut[0:8] + " " + atleastOut[8:16])
+				fmt.Println(" Update cutoff to " + b[0:8] + " " + b[8:16])
 			} else if strings.HasPrefix(bodyString, "\nalready present") {
-				atleastOut = cutoffRegex.FindStringSubmatch(bodyString)[1]
-				fmt.Println("Set cutoff to " + atleastOut[0:8] + " " + atleastOut[8:16])
+				c := cutoffRegex.FindStringSubmatch(bodyString)[1]
+				atleastOut = stringToHexBytes(c)
+				fmt.Println("Set cutoff to " + c[0:8] + " " + c[8:16])
 			} else {
 				fmt.Print("unknown response")
 				fmt.Print(bodyString)
@@ -135,10 +160,23 @@ func post(s string, atleast string) (atleastOut string, fail error) {
 	return
 }
 
+func stringToHexBytes(s string) []byte {
+	data, _ := hex.DecodeString(s)
+	return data
+}
+
 func hash(x string) string {
 	sha.Reset()
+
 	io.WriteString(sha, x)
 	return fmt.Sprintf("%x", sha.Sum(nil))
+}
+
+func hashFast(x []byte) []byte {
+	sha.Reset()
+	sha.Write(x)
+	return sha.Sum(nil)
+	//return fmt.Sprintf("%x", sha.Sum(nil))
 }
 
 func randSentence(pre, post string) string {
@@ -146,14 +184,34 @@ func randSentence(pre, post string) string {
 	for i := 0; i < len(words); i++ {
 		var j = len(words[i])
 		var r = rand.Intn(j)
-		if i == 0 {
-			sentence += strings.ToUpper(words[i][r][0:1]) + words[i][r][1:]
-		} else {
-			sentence += " " + words[i][r]
+		if i > 0 {
+			sentence += " "
 		}
-
+		sentence += words[i][r]
 	}
 	return sentence + post
+}
+
+func randSentenceFast(pre, post []byte) (sentence [256]byte, n int) {
+	n = len(pre)
+	copy(sentence[:], pre)
+
+	//sentence := pre
+	for i := 0; i < len(wordsByte); i++ {
+		var j = len(wordsByte[i])
+		var r = rand.Intn(j)
+		if i > 0 {
+			sentence[n] = []byte(" ")[0]
+			n = n + 1
+		}
+		copy(sentence[n:], wordsByte[i][r])
+		n += len(wordsByte[i][r])
+	}
+
+	copy(sentence[n:], post)
+	n += len(post)
+	return
+	//return sentence, n
 }
 
 var sha = nativeSha.New()
@@ -164,8 +222,8 @@ func init() {
 }
 
 var words = [][]string{{
-	"capture", "dispense", "eject", "imagine", "be", "do", "have", "become", "once", "if", "imagine if", "suppose that", "I know", "don't fear",
-	"because", "therefore", "as though", "we think", "I believe", "you hope"},
+	"Capture", "Dispense", "Eject", "Imagine", "Be", "Do", "Have", "Become", "Once", "If", "Imagine if", "Suppose that",
+	"I know", "Don't fear", "Because", "Therefore", "As though", "We think", "I believe", "You hope"},
 
 	{"those", "my", "her", "his", "what", "our", "when", "that", "some", "one", "a", "some", "the", "a", "the"},
 
@@ -200,4 +258,19 @@ var words = [][]string{{
 		"ferns", "faucets", "tables", "memories", "teachers", "soldiers", "workers", "children", "landscape", "arm chair", "legends", "tales", "trash pile", "stories", "veils", "valleys", "peaks",
 		"mountain tops", "fruits", "trees", "vines", "birds", "storylines", "embers", "civilization", "culture",
 	},
+}
+
+var wordsByte [][][]byte
+
+func initWordsByte() {
+	wordsByte = make([][][]byte, len(words))
+	for i := 0; i < len(words); i++ {
+		curr := words[i]
+		wordsByte[i] = make([][]byte, len(curr))
+		for j := 0; j < len(curr); j++ {
+			word := curr[j]
+			//wordsByte[i][j]=make([]byte, len(word))
+			wordsByte[i][j] = []byte(word)
+		}
+	}
 }
