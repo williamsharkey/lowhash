@@ -1,10 +1,12 @@
 package main
 
 import (
-	nativeSha "crypto/sha256"
+	//nativeSha "crypto/sha256"
+	"github.com/williamsharkey/sha256-simd"
+	//"github.com/minio/sha256-simd"
+	//wmSha "github.com/williamsharkey/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -19,14 +21,14 @@ import (
 
 func main() {
 
-	prefix := []byte("")
-	postfix := []byte(".")
+	prefix := ""
+	postfix := "."
 
 	if len(os.Args) > 1 {
-		prefix = []byte(os.Args[1])
+		prefix = os.Args[1]
 	}
 	if len(os.Args) > 2 {
-		postfix = []byte(os.Args[2])
+		postfix = os.Args[2]
 	}
 
 	fmt.Println(" ")
@@ -43,10 +45,10 @@ func main() {
 	fmt.Println()
 	start := time.Now()
 
-	initWordsByte()
+	initWordsByte(prefix, postfix)
 
 	// prime the program with a cutoff
-	cutoff := []byte{0xff}
+	cutoff := [32]byte{0xff}
 	var err error
 
 	const batch = 1000000 * 2 // about every two seconds, modulo how fast your computer is
@@ -56,21 +58,59 @@ func main() {
 	n := 0
 
 	rands = genEightRands()
+	arr, n = randSentenceFixedArrFasterRands(rands)
+	//digest:=sha256.New()
+	//sha256.WhatBlock()
+	//return
+	var xx sha256.Sha256Digest
+	digest := &xx
+	digest.Reset()
+
+	var hash [32]byte
+	//digest.Write([]byte{0,1,2})
+	//hash = digest.CheckSum()
+	//fmt.Println(hash)
+	//digest.Reset()
+	//digest.Write([]byte{0,1})
+	//d0:= *digest
+	//digest.Write([]byte{2})
+	//hash = digest.CheckSum()
+	//fmt.Println(hash)
+	//
+	//digest.Reset()
+	//digest.Write([]byte{0,1,3})
+	//hash = digest.CheckSum()
+	//fmt.Println(hash)
+	//
+	//d0.Write([]byte{3})
+	//hash = d0.CheckSum()
+	//fmt.Println(hash)
+	//
+	//return
 
 	for i := 0; true; i++ {
 
-		rands = addOne(rands)
-		arr, n = randSentenceFixedArrFasterRands(rands, prefix, postfix)
-		hash := hashFast(arr[:n])
+		if rands[7] == 0 {
+			arr, n = randSentenceFixedArrFasterRands(rands)
+			digest.Reset()
+			digest.Write(arr[:n])
+
+		}
+
+		// make a copy of the digest
+		d0 := *digest
+		d0.Write(wordsByte[7][rands[7]])
+		hash = d0.CheckSum()
 
 		if leftLess(hash, cutoff) {
-			cutoff, err = post(string(arr[:n]), cutoff)
+
+			cutoff, err = post(string(arr[:n])+string(wordsByte[7][rands[7]]), cutoff)
 			if err != nil {
 				fmt.Println("Quitting, err " + err.Error())
 				return
 			}
 		}
-
+		rands = addOne(rands)
 		if i > batch {
 
 			hashesPerSecond := float64(batch) / (float64(time.Since(start).Nanoseconds()) / float64(1000000000))
@@ -82,11 +122,14 @@ func main() {
 
 			// get fresh rands
 			rands = genEightRands()
+			rands[7] = 0
+
 		}
+
 	}
 }
 
-func leftLess(a, b []byte) bool {
+func leftLess(a, b [32]byte) bool {
 	for i := 0; i < len(a); i++ {
 		if a[i] < b[i] {
 			return true
@@ -102,7 +145,7 @@ var cutoffRegex, _ = regexp.Compile(".*cutoff: (.*)")
 var msgRegex, _ = regexp.Compile(".*msg: (.*)")
 var rankRegex, _ = regexp.Compile(".*rank: (.*)")
 
-func post(s string, atleast []byte) (atleastOut []byte, fail error) {
+func post(s string, atleast [32]byte) (atleastOut [32]byte, fail error) {
 
 	atleastOut = atleast
 	form := url.Values{}
@@ -168,36 +211,11 @@ func post(s string, atleast []byte) (atleastOut []byte, fail error) {
 	return
 }
 
-func stringToHexBytes(s string) []byte {
+func stringToHexBytes(s string) (dout [32]byte) {
 	data, _ := hex.DecodeString(s)
-	return data
-}
 
-func hash(x string) string {
-	sha.Reset()
-
-	io.WriteString(sha, x)
-	return fmt.Sprintf("%x", sha.Sum(nil))
-}
-
-func hashFast(x []byte) []byte {
-	sha.Reset()
-	sha.Write(x)
-	return sha.Sum(nil)
-	//return fmt.Sprintf("%x", sha.Sum(nil))
-}
-
-func randSentence(pre, post string) string {
-	sentence := pre
-	for i := 0; i < len(words); i++ {
-		var j = len(words[i])
-		var r = rand.Intn(j)
-		if i > 0 {
-			sentence += " "
-		}
-		sentence += words[i][r]
-	}
-	return sentence + post
+	copy(dout[:], data)
+	return dout
 }
 
 var spaceByte = []byte(" ")[0]
@@ -238,19 +256,12 @@ func addOne(randIn [8]int) [8]int {
 	return randIn
 }
 
-func randSentenceFixedArrFasterRands(eightRands [8]int, pre, post []byte) (arr [256]byte, n int) {
+func randSentenceFixedArrFasterRands(eightRands [8]int) (arr [256]byte, n int) {
 	n = 0
-	for i := 0; i < len(pre); i++ {
-		arr[i] = pre[i]
-	}
-	n = n + len(pre)
 
-	for i := 0; i < len(wordsByte); i++ {
+	for i := 0; i < len(wordsByte)-1; i++ {
 		r := eightRands[i]
-		if i > 0 {
-			arr[n] = spaceByte
-			n = n + 1
-		}
+
 		for k := 0; k < len(wordsByte[i][r]); k++ {
 			arr[n+k] = wordsByte[i][r][k]
 		}
@@ -258,15 +269,10 @@ func randSentenceFixedArrFasterRands(eightRands [8]int, pre, post []byte) (arr [
 		n += len(wordsByte[i][r])
 	}
 
-	for i := 0; i < len(post); i++ {
-		arr[n+i] = post[i]
-	}
-	n = n + len(post)
-
 	return arr, n
 }
 
-var sha = nativeSha.New()
+//var sha =  nativeSha.New() //wmSha.New256()
 
 func init() {
 	rand.Seed(time.Now().Unix())
@@ -314,15 +320,34 @@ var words = [8][]string{{
 
 var wordsByte [8][64][]byte
 
-func initWordsByte() {
-	//wordsByte = make([][][]byte, len(words))
-	for i := 0; i < 8; i++ {
-		curr := words[i]
-		//wordsByte[i] = make([64][]byte, len(curr))
+func initWordsByte(prefix, postfix string) {
+
+	i := 0
+	curr := words[i]
+
+	for j := 0; j < 64; j++ {
+		word := curr[j%len(curr)]
+
+		wordsByte[i][j] = []byte(prefix + word + " ")
+	}
+
+	for i = 1; i < 7; i++ {
+		curr = words[i]
+
 		for j := 0; j < 64; j++ {
 			word := curr[j%len(curr)]
-			//wordsByte[i][j]=make([]byte, len(word))
-			wordsByte[i][j] = []byte(word)
+
+			wordsByte[i][j] = []byte(word + " ")
 		}
 	}
+
+	i = 7
+	curr = words[i]
+
+	for j := 0; j < 64; j++ {
+		word := curr[j%len(curr)]
+
+		wordsByte[i][j] = []byte(word + postfix)
+	}
+
 }
