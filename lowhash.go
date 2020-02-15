@@ -19,14 +19,14 @@ import (
 
 func main() {
 
-	prefix := ""
-	postfix := "."
+	prefix := []byte("")
+	postfix := []byte(".")
 
 	if len(os.Args) > 1 {
-		prefix = os.Args[1]
+		prefix = []byte(os.Args[1])
 	}
 	if len(os.Args) > 2 {
-		postfix = os.Args[2]
+		postfix = []byte(os.Args[2])
 	}
 
 	fmt.Println(" ")
@@ -43,24 +43,28 @@ func main() {
 	fmt.Println()
 	start := time.Now()
 
-	// prime the program with a cutoff
-	atleast, err := post("a new paper suffers as if the thoughts", []byte{0xff})
-
-	const batch = 400000 * 2 // about every two seconds, modulo how fast your computer is
-
 	initWordsByte()
-	//sx,n := randSentenceFast([]byte(prefix),[]byte(postfix))
-	//fmt.Println(string(sx[:n]))
-	//return
+
+	// prime the program with a cutoff
+	cutoff := []byte{0xff}
+	var err error
+
+	const batch = 1000000 * 2 // about every two seconds, modulo how fast your computer is
+
+	var arr [256]byte
+	var rands [8]int
+	n := 0
+
+	rands = genEightRands()
+
 	for i := 0; true; i++ {
 
-		//s := randSentence(prefix, postfix)
-		s, n := randSentenceFast([]byte(prefix), []byte(postfix))
-		//s:="fixed"
-		hash := hashFast(s[:n])
-		//hash := hash(s)
-		if leftLess(hash, atleast) {
-			atleast, err = post(string(s[:n]), atleast)
+		rands = addOne(rands)
+		arr, n = randSentenceFixedArrFasterRands(rands, prefix, postfix)
+		hash := hashFast(arr[:n])
+
+		if leftLess(hash, cutoff) {
+			cutoff, err = post(string(arr[:n]), cutoff)
 			if err != nil {
 				fmt.Println("Quitting, err " + err.Error())
 				return
@@ -75,6 +79,9 @@ func main() {
 
 			// avoid an int overflow
 			i = 0
+
+			// get fresh rands
+			rands = genEightRands()
 		}
 	}
 }
@@ -96,6 +103,7 @@ var msgRegex, _ = regexp.Compile(".*msg: (.*)")
 var rankRegex, _ = regexp.Compile(".*rank: (.*)")
 
 func post(s string, atleast []byte) (atleastOut []byte, fail error) {
+
 	atleastOut = atleast
 	form := url.Values{}
 	form.Add("msg", s)
@@ -192,26 +200,70 @@ func randSentence(pre, post string) string {
 	return sentence + post
 }
 
-func randSentenceFast(pre, post []byte) (sentence [256]byte, n int) {
-	n = len(pre)
-	copy(sentence[:], pre)
+var spaceByte = []byte(" ")[0]
 
-	//sentence := pre
+const sixtyfourToEigth int64 = 281474976710656
+
+func genEightRands() (r [8]int) {
+	var x = rand.Int63n(sixtyfourToEigth)
+	r[0] = int(x & 0x3F)
+	x = x >> 5
+	r[1] = int(x & 0x3F)
+	x = x >> 5
+	r[2] = int(x & 0x3F)
+	x = x >> 5
+	r[3] = int(x & 0x3F)
+	x = x >> 5
+	r[4] = int(x & 0x3F)
+	x = x >> 5
+	r[5] = int(x & 0x3F)
+	x = x >> 5
+	r[6] = int(x & 0x3F)
+	x = x >> 5
+	r[7] = int(x & 0x3F)
+	return
+}
+
+func addOne(randIn [8]int) [8]int {
+
+	for pos := 7; pos >= 0; pos = pos - 1 {
+		randIn[pos] = randIn[pos] + 1
+		if randIn[pos] >= len(words[pos]) {
+			randIn[pos] = 0
+		} else {
+			return randIn
+		}
+	}
+
+	return randIn
+}
+
+func randSentenceFixedArrFasterRands(eightRands [8]int, pre, post []byte) (arr [256]byte, n int) {
+	n = 0
+	for i := 0; i < len(pre); i++ {
+		arr[i] = pre[i]
+	}
+	n = n + len(pre)
+
 	for i := 0; i < len(wordsByte); i++ {
-		var j = len(wordsByte[i])
-		var r = rand.Intn(j)
+		r := eightRands[i]
 		if i > 0 {
-			sentence[n] = []byte(" ")[0]
+			arr[n] = spaceByte
 			n = n + 1
 		}
-		copy(sentence[n:], wordsByte[i][r])
+		for k := 0; k < len(wordsByte[i][r]); k++ {
+			arr[n+k] = wordsByte[i][r][k]
+		}
+
 		n += len(wordsByte[i][r])
 	}
 
-	copy(sentence[n:], post)
-	n += len(post)
-	return
-	//return sentence, n
+	for i := 0; i < len(post); i++ {
+		arr[n+i] = post[i]
+	}
+	n = n + len(post)
+
+	return arr, n
 }
 
 var sha = nativeSha.New()
@@ -221,7 +273,7 @@ func init() {
 
 }
 
-var words = [][]string{{
+var words = [8][]string{{
 	"Capture", "Dispense", "Eject", "Imagine", "Be", "Do", "Have", "Become", "Once", "If", "Imagine if", "Suppose that",
 	"I know", "Don't fear", "Because", "Therefore", "As though", "We think", "I believe", "You hope"},
 
@@ -260,15 +312,15 @@ var words = [][]string{{
 	},
 }
 
-var wordsByte [][][]byte
+var wordsByte [8][64][]byte
 
 func initWordsByte() {
-	wordsByte = make([][][]byte, len(words))
-	for i := 0; i < len(words); i++ {
+	//wordsByte = make([][][]byte, len(words))
+	for i := 0; i < 8; i++ {
 		curr := words[i]
-		wordsByte[i] = make([][]byte, len(curr))
-		for j := 0; j < len(curr); j++ {
-			word := curr[j]
+		//wordsByte[i] = make([64][]byte, len(curr))
+		for j := 0; j < 64; j++ {
+			word := curr[j%len(curr)]
 			//wordsByte[i][j]=make([]byte, len(word))
 			wordsByte[i][j] = []byte(word)
 		}
