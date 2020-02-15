@@ -1,5 +1,5 @@
 # lowhash
-search for (readable) strings which produce low sha256 hashes.
+Search for (readable) strings which produce low sha256 hashes.
 
 # installation
 
@@ -7,7 +7,7 @@ search for (readable) strings which produce low sha256 hashes.
   
   If you want to build it yourself, or are on OSX or Linux
   
-  - make sure you have the go installed, then:
+  - make sure you have go installed, see [https://golang.org]
   - `go get github.com/williamsharkey/lowhash`
   - change directory to <your go path>/scr/github.com/williamsharkey/lowhash/
   - `go build`
@@ -21,10 +21,7 @@ search for (readable) strings which produce low sha256 hashes.
   
  
 ## tag yourself!
-  - If you want 'credit' for your finds, set a prefix or postfix for your search strings.   
-
-  - if you provide arguments to lowhash, they will be taken as the prefix and postfix.
-    - a default postfix of period is added, which can be customized
+  - lowhash takes two optional arguments for specifying prefix and postfix.
   
 ### examples
 ```
