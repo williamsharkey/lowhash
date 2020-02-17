@@ -22,7 +22,7 @@ import (
 func main() {
 
 	prefix := ""
-	postfix := "."
+	postfix := ""
 
 	if len(os.Args) > 1 {
 		prefix = os.Args[1]
@@ -43,51 +43,98 @@ func main() {
 	fmt.Printf("postfix: %q\n", postfix)
 	fmt.Println("to set a prefix/postfix, run with arguments, eg: lowhash \"my prefix\" \"my postfix\"")
 	fmt.Println()
-	start := time.Now()
 
-	initWordsByte(prefix, postfix)
+	initWordsFixed(prefix, postfix)
 
 	// prime the program with a cutoff
 	cutoff := [32]byte{0xff}
+
+	const batch = 2000000 // about every second, modulo how fast your computer is
+
+	x := append(append([][]string{{prefix}}, words...), []string{postfix})
+	methodB(x, cutoff, batch)
+}
+
+func methodB(words [][]string, cutoff [32]byte, batch int) {
+	start := time.Now()
+	wordsUnfixed := initWordsUnfixed(combineWords(words))
+	i := 0
+	b := 0
+	selWords := genRands(wordsUnfixed)
+
+	carries := len(selWords)
+	fmt.Printf("random sentence starting point:\n%q\n\n", selectedWordsToStr(selWords, 0, wordsUnfixed))
+	var emptyDigest sha256.Sha256Digest
+	emptyDigest.Reset()
+	var hash [32]byte
+	digests := make([][]sha256.Sha256Digest, len(wordsUnfixed))
+	var wcnt = len(wordsUnfixed)
+	for {
+		newWords := false
+		for w := wcnt - 1 - carries; w < wcnt; w++ {
+			currWords := wordsUnfixed[w]
+			digests[w] = make([]sha256.Sha256Digest, len(currWords))
+			for d := 0; d < len(currWords); d++ {
+				if w == 0 {
+					digests[w][d] = *(&emptyDigest)
+				} else {
+					digests[w][d] = *(&digests[w-1][selWords[w-1]])
+				}
+
+				digests[w][d].Write(wordsUnfixed[w][d])
+				if w == wcnt-1 {
+					hash = digests[w][d].CheckSum()
+
+					if leftLess(hash, cutoff) {
+						s := selectedWordsToStr(selWords, d, wordsUnfixed)
+						fmt.Printf("potential found %s\n", s)
+						cutoff = postB(s, cutoff)
+						newWords = true
+					}
+					i = i + 1
+
+				}
+			}
+
+		}
+		if newWords {
+			selWords = genRands(wordsUnfixed)
+			carries = len(selWords)
+			fmt.Printf("Jump to new random sentence:\n%q\n\n", selectedWordsToStr(selWords, 0, wordsUnfixed))
+		} else {
+			carries = addOneB(selWords, wordsUnfixed)
+		}
+
+		if i > batch {
+			hashesPerSecond := float64(i) / (float64(time.Since(start).Nanoseconds()) / float64(1000000000))
+			start = time.Now()
+			fmt.Printf("%3dk hashes per second\n", int64(hashesPerSecond/1000))
+
+			// avoid an int overflow
+			i = 0
+
+			if b%10 == 0 {
+				fmt.Printf("current position: %q\n", selectedWordsToStr(selWords, 0, wordsUnfixed))
+			}
+			b = b + 1
+		}
+
+	}
+
+}
+
+func methodA(cutoff [32]byte, batch int) {
+	start := time.Now()
 	var err error
-
-	const batch = 1000000 * 2 // about every two seconds, modulo how fast your computer is
-
 	var arr [256]byte
 	var rands [8]int
 	n := 0
-
 	rands = genEightRands()
 	arr, n = randSentenceFixedArrFasterRands(rands)
-	//digest:=sha256.New()
-	//sha256.WhatBlock()
-	//return
 	var xx sha256.Sha256Digest
 	digest := &xx
 	digest.Reset()
-
 	var hash [32]byte
-	//digest.Write([]byte{0,1,2})
-	//hash = digest.CheckSum()
-	//fmt.Println(hash)
-	//digest.Reset()
-	//digest.Write([]byte{0,1})
-	//d0:= *digest
-	//digest.Write([]byte{2})
-	//hash = digest.CheckSum()
-	//fmt.Println(hash)
-	//
-	//digest.Reset()
-	//digest.Write([]byte{0,1,3})
-	//hash = digest.CheckSum()
-	//fmt.Println(hash)
-	//
-	//d0.Write([]byte{3})
-	//hash = d0.CheckSum()
-	//fmt.Println(hash)
-	//
-	//return
-
 	for i := 0; true; i++ {
 
 		if rands[7] == 0 {
@@ -99,12 +146,12 @@ func main() {
 
 		// make a copy of the digest
 		d0 := *digest
-		d0.Write(wordsByte[7][rands[7]])
+		d0.Write(wordsFixed[7][rands[7]])
 		hash = d0.CheckSum()
 
 		if leftLess(hash, cutoff) {
 
-			cutoff, err = post(string(arr[:n])+string(wordsByte[7][rands[7]]), cutoff)
+			cutoff, err = post(string(arr[:n])+string(wordsFixed[7][rands[7]]), cutoff)
 			if err != nil {
 				fmt.Println("Quitting, err " + err.Error())
 				return
@@ -119,13 +166,10 @@ func main() {
 
 			// avoid an int overflow
 			i = 0
-
 			// get fresh rands
 			rands = genEightRands()
 			rands[7] = 0
-
 		}
-
 	}
 }
 
@@ -144,6 +188,25 @@ func leftLess(a, b [32]byte) bool {
 var cutoffRegex, _ = regexp.Compile(".*cutoff: (.*)")
 var msgRegex, _ = regexp.Compile(".*msg: (.*)")
 var rankRegex, _ = regexp.Compile(".*rank: (.*)")
+
+func selectedWordsToStr(selectedWords []int, lastWord int, wordsUnfixed [][][]byte) string {
+	//xs := append(selectedWords, lastWord)
+	s := ""
+	for i := 0; i < len(selectedWords); i++ {
+		s += string(wordsUnfixed[i][selectedWords[i]])
+	}
+	s += string(wordsUnfixed[len(selectedWords)][lastWord])
+	return s
+}
+
+func postB(s string, cutoff [32]byte) (newCuttoff [32]byte) {
+
+	newCuttoff, err := post(s, cutoff)
+	if err != nil {
+		fmt.Print("error while posting: %s\n", err.Error())
+	}
+	return
+}
 
 func post(s string, atleast [32]byte) (atleastOut [32]byte, fail error) {
 
@@ -242,6 +305,14 @@ func genEightRands() (r [8]int) {
 	return
 }
 
+func genRands(wordsUnfixed [][][]byte) (r []int) {
+	r = make([]int, len(wordsUnfixed)-1)
+	for w := 0; w < len(wordsUnfixed)-1; w++ {
+		r[w] = rand.Intn(len(wordsUnfixed[w]))
+	}
+	return
+}
+
 func addOne(randIn [8]int) [8]int {
 
 	for pos := 7; pos >= 0; pos = pos - 1 {
@@ -252,21 +323,34 @@ func addOne(randIn [8]int) [8]int {
 			return randIn
 		}
 	}
-
 	return randIn
+}
+
+func addOneB(selWords []int, wordsUnfixed [][][]byte) (carries int) {
+
+	for pos := len(selWords) - 1; pos >= 0; pos = pos - 1 {
+		selWords[pos] = selWords[pos] + 1
+		if selWords[pos] >= len(wordsUnfixed[pos]) {
+			carries = carries + 1
+			selWords[pos] = 0
+		} else {
+			return
+		}
+	}
+	return
 }
 
 func randSentenceFixedArrFasterRands(eightRands [8]int) (arr [256]byte, n int) {
 	n = 0
 
-	for i := 0; i < len(wordsByte)-1; i++ {
+	for i := 0; i < len(wordsFixed)-1; i++ {
 		r := eightRands[i]
 
-		for k := 0; k < len(wordsByte[i][r]); k++ {
-			arr[n+k] = wordsByte[i][r][k]
+		for k := 0; k < len(wordsFixed[i][r]); k++ {
+			arr[n+k] = wordsFixed[i][r][k]
 		}
 
-		n += len(wordsByte[i][r])
+		n += len(wordsFixed[i][r])
 	}
 
 	return arr, n
@@ -279,56 +363,59 @@ func init() {
 
 }
 
-var words = [8][]string{{
+var words = [][]string{{
 	"Capture", "Dispense", "Eject", "Imagine", "Be", "Do", "Have", "Become", "Once", "If", "Imagine if", "Suppose that",
 	"I know", "Don't fear", "Because", "Therefore", "As though", "We think", "I believe", "You hope"},
-
+	{" "},
 	{"those", "my", "her", "his", "what", "our", "when", "that", "some", "one", "a", "some", "the", "a", "the"},
-
+	{" "},
 	{"lost", "hidden", "sorry", "embodied", "intrinsic", "electronic", "new", "outdated", "tender", "ignorant",
 		"practical", "scared", "slender", "graceful", "shy", "earnest", "delicate", "fragile",
 		"green", "pink", "blue", "terrible", "beautiful", "secret", "mystery", "vapor", "glinting", "shimmering",
 		"glimmering", "dull", "dark", "empty", "hollow", "blank", "deafening", "quiet", "stale", "damp", "wet",
 		"dry", "thoughtful", "fractured", "violent", "calm", "scared", "frightened",
 	},
-
+	{" "},
 	{"machines", "students", "desks", "hammers", "loves", "friendships", "teachers", "pianists", "roads", "bedrooms", "humans",
 		"computers", "towns", "cities", "cultures", "circles", "rocks", "papers", "shards", "crystals", "keyboards",
 		"waves",
 	},
-
+	{" "},
 	{"orbit", "cry", "hide", "darken", "tan", "profit", "hum", "vibrate", "wander", "chatter", "pose", "shatter", "dissolve", "rotate",
 		"hamper", "fall", "bend", "suffer", "remember", "hope", "dream", "blast", "delete", "describe",
 		"report", "confuse", "destroy", "slide", "create", "cycle", "grow", "eclipse", "elide", "vocalize",
 		"permit", "emit", "evolve", "enjoy",
 	},
-
+	{" "},
 	{"under", "then", "after", "before", "as if", "like", "by", "above", "narrows", "thins", "shrinks", "blossoms", "through", "amongst", "repeatedly", "one", "my", "our", "their", "his",
 		"her", "your", "you", "someone", "anyone", "cleanly through loops of", "tiny", "emanating from the",
 	},
-
+	{" "},
 	{"the", "antiquated", "mathematical", "mystical", "sad", "sorry", "clever", "some", "thoughtful", "dreadful", "one", "unimaginable", "endless", "finite", "restless", "sleepy", "evening", "sad", "vacant",
 		"morning", "loves", "misses", "wonders", "appreciates", "fears", "quietly",
 	},
+
+	{" "},
 
 	{"face", "covers", "blankets", "expression", "tone", "impression", "science", "suspicions", "algorithms", "words", "papers", "thoughts", "touches", "breaths", "ideas", "notions", "dreams", "fabric", "clothes",
 		"sky", "language", "grammar", "memories", "nights", "earth", "planets", "moons", "sky", "desert",
 		"ferns", "faucets", "tables", "memories", "teachers", "soldiers", "workers", "children", "landscape", "arm chair", "legends", "tales", "trash pile", "stories", "veils", "valleys", "peaks",
 		"mountain tops", "fruits", "trees", "vines", "birds", "storylines", "embers", "civilization", "culture",
 	},
+
+	{".", "?", "!", ""},
 }
 
-var wordsByte [8][64][]byte
+var wordsFixed [8][64][]byte
 
-func initWordsByte(prefix, postfix string) {
-
+func initWordsFixed(prefix, postfix string) {
 	i := 0
 	curr := words[i]
 
 	for j := 0; j < 64; j++ {
 		word := curr[j%len(curr)]
 
-		wordsByte[i][j] = []byte(prefix + word + " ")
+		wordsFixed[i][j] = []byte(prefix + word)
 	}
 
 	for i = 1; i < 7; i++ {
@@ -337,7 +424,7 @@ func initWordsByte(prefix, postfix string) {
 		for j := 0; j < 64; j++ {
 			word := curr[j%len(curr)]
 
-			wordsByte[i][j] = []byte(word + " ")
+			wordsFixed[i][j] = []byte(word)
 		}
 	}
 
@@ -347,7 +434,47 @@ func initWordsByte(prefix, postfix string) {
 	for j := 0; j < 64; j++ {
 		word := curr[j%len(curr)]
 
-		wordsByte[i][j] = []byte(word + postfix)
+		wordsFixed[i][j] = []byte(word + postfix)
 	}
 
+}
+
+func initWordsUnfixed(wordPositions [][]string) (wordPositionsBytes [][][]byte) {
+	wordPositionsBytes = make([][][]byte, len(wordPositions))
+	for i := 0; i < len(wordPositions); i++ {
+		curr := wordPositions[i]
+		wordPositionsBytes[i] = make([][]byte, len(curr))
+		for j := 0; j < len(curr); j++ {
+			word := curr[j]
+			wordPositionsBytes[i][j] = []byte(word)
+		}
+	}
+
+	return wordPositionsBytes
+}
+
+func combineWords(ws [][]string) [][]string {
+	c := [][]string{}
+	last := ""
+	for i := 0; i < len(ws); i++ {
+
+		if len(ws[i]) == 1 {
+			//copyLast=true
+			last = last + ws[i][0]
+		} else {
+			c = append(c, ws[i])
+			for j := 0; j < len(ws[i]); j++ {
+				c[len(c)-1][j] = last + c[len(c)-1][j]
+			}
+			last = ""
+		}
+	}
+	// postfix final entries
+	if last != "" {
+		for j := 0; j < len(c[len(c)-1]); j++ {
+			c[len(c)-1][j] = c[len(c)-1][j] + last
+		}
+	}
+
+	return c
 }
