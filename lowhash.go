@@ -67,23 +67,29 @@ func methodB(words [][]string, cutoff [32]byte, batch int) {
 	var emptyDigest sha256.Sha256Digest
 	emptyDigest.Reset()
 	var hash [32]byte
-	digests := make([][]sha256.Sha256Digest, len(wordsUnfixed))
+	digests := make([][]sha256.Sha256Digest, len(wordsUnfixed)-1)
 	var wcnt = len(wordsUnfixed)
 	for {
 		newWords := false
 		for w := wcnt - 1 - carries; w < wcnt; w++ {
 			currWords := wordsUnfixed[w]
-			digests[w] = make([]sha256.Sha256Digest, len(currWords))
+			if w < wcnt-1 {
+				digests[w] = make([]sha256.Sha256Digest, len(currWords))
+			}
 			for d := 0; d < len(currWords); d++ {
+				var currentDigest *sha256.Sha256Digest
 				if w == 0 {
-					digests[w][d] = *(&emptyDigest)
+					currentDigest = &emptyDigest
 				} else {
-					digests[w][d] = *(&digests[w-1][selWords[w-1]])
+					currentDigest = &digests[w-1][selWords[w-1]]
 				}
-
-				digests[w][d].Write(wordsUnfixed[w][d])
-				if w == wcnt-1 {
-					hash = digests[w][d].CheckSum()
+				if w < wcnt-1 {
+					digests[w][d] = *currentDigest
+					digests[w][d].Write(wordsUnfixed[w][d])
+				} else {
+					cd := *currentDigest
+					cd.Write(wordsUnfixed[w][d])
+					hash = cd.CheckSum()
 
 					if leftLess(hash, cutoff) {
 						s := selectedWordsToStr(selWords, d, wordsUnfixed)
