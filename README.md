@@ -1,20 +1,29 @@
-# lowhash
-Search for (readable) strings which produce low sha256 hashes.
+# _lowhash_
+Join the search for magical  strings which produce the lowest sha256 hashes.
 
-# installation
+## Get on the Scoreboard
 
-  If you have Windows, you can download the executable from the "releases"
+See the current 256 lowest strings at https://lowhash.com
+
+## Install
+
+  Download a compiled executable for your system:
   
-  If you want to build it yourself, or are on OSX or Linux
+  - Windows 64bit
+  - MacOS
+  - Linux
   
-  - make sure you have go installed, see [https://golang.org]
-  - `go get github.com/williamsharkey/lowhash`
-  - change directory to <your go path>/scr/github.com/williamsharkey/lowhash/
+ ##Build from Source
+  
+  If you want to build it yourself:
+  
+  - you need the Go compiler, see [https://golang.org]
+  - run: `go get github.com/williamsharkey/lowhash`
+  - change directory to $GOPATH/scr/github.com/williamsharkey/lowhash/
   - `go build`
-  - now you should have produced lowhash.exe(windows) or lowhash
 
-## run
-  - cd to folder with lowhash
+## About
+  - lowhash loads a default sentence generator grammar unless grammar.txt is found in the current directory
   - run `lowhash` and wait for it to produce strings with low hashes
   - low hashes which are found will be automatically posted to https://lowhash.com
   - low hashes will be printed to console, so if your internet is inaccessable, so look at the console
@@ -25,10 +34,10 @@ Search for (readable) strings which produce low sha256 hashes.
   
 ### examples
 ```
-  lowhash                    (no prefix / default period postfix)   => "The quick brown fox."
-  lowhash "" ""              (no prefix / no postfix    )           => "The quick brown fox"
-  lowhash "(william)"                                               => "(william) The quick brown fox."
-  lowhash "" " (william)"                                           => "The quick brown fox (william)"
+  lowhash                           => "The quick brown fox."
+  lowhash "" ""                     => "The quick brown fox."
+  lowhash "(william) "              => "(william) The quick brown fox."
+  lowhash "<yo> " " -william"       => "<yo> The quick brown fox -william"
 ```
 
 

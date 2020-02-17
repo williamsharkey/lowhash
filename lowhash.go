@@ -45,16 +45,11 @@ func main() {
 	fmt.Println("to set a prefix/postfix, run with arguments, eg: lowhash \"my prefix\" \"my postfix\"")
 	fmt.Println()
 
-	initWordsFixed(prefix, postfix)
+	const batch = 2000000 * 5 // about every 5 seconds, modulo how fast your computer is
 
-	// prime the program with a cutoff
-	cutoff := [32]byte{0xff}
+	grammar := generateWords(defaultWords, prefix, postfix)
 
-	const batch = 2000000 // about every second, modulo how fast your computer is
-
-	x := append(append([][]string{{prefix}}, words...), []string{postfix})
-	methodB(x, cutoff, batch)
-	//methodA(cutoff,batch)
+	digestTree(grammar, batch)
 }
 
 func printCombos(words [][]string) {
@@ -75,13 +70,14 @@ func printTreeBreadth(words [][]string) {
 	fmt.Printf("Tree Breadth: [%s]\n", s)
 }
 
-func methodB(words [][]string, cutoff [32]byte, batch int) {
-	start := time.Now()
-	grammar := words
-	custom, errRead := readLines("lowhash.txt")
+func generateWords(defaultGrammar [][]string, prefix, postfix string) Grammar {
+
+	grammar := defaultGrammar
+	custom, errRead := readLines("grammar.txt")
 	if errRead == nil {
 		grammar = custom
 	}
+	grammar = append(append([][]string{{prefix}}, grammar...), []string{postfix})
 
 	printCombos(grammar)
 	combinedWords := combineWords(grammar)
@@ -93,26 +89,48 @@ func methodB(words [][]string, cutoff [32]byte, batch int) {
 		frontWide := widenTree(front, 1024*128)
 		backWide := widenTree(back, 0)
 		recombinedTree := append(frontWide, backWide...)
-		combinedWords = recombinedTree
+
+		printTreeBreadth(recombinedTree)
+		return strsToByte(recombinedTree)
+	} else {
+
+		printTreeBreadth(combinedWords)
+		return strsToByte(combinedWords)
+
 	}
 
-	printTreeBreadth(combinedWords)
-	wordsUnfixed := initWordsUnfixed(combinedWords)
+}
+
+type Grammar [][][]byte
+
+func (g Grammar) Str(selWords []int, lastWord int) string {
+	s := ""
+	for i := 0; i < len(selWords); i++ {
+		s += string(g[i][selWords[i]])
+	}
+	s += string(g[len(selWords)][lastWord])
+	return s
+}
+
+func digestTree(grammar Grammar, batch int) {
+	start := time.Now()
 	i := 0
 	b := 0
-	selWords := genRands(wordsUnfixed)
-
+	selWords := genRands(grammar)
 	carries := len(selWords)
-	fmt.Printf("random sentence starting point:\n%q\n\n", selectedWordsToStr(selWords, 0, wordsUnfixed))
+	initStr := grammar.Str(selWords, 0)
+	cutoff := post(initStr, sha256.Sum256([]byte(initStr)))
+
+	fmt.Printf("Start search with:\n%q\n\n", initStr)
 	var emptyDigest sha256.Sha256Digest
 	emptyDigest.Reset()
 	var hash [32]byte
-	digests := make([][]sha256.Sha256Digest, len(wordsUnfixed)-1)
-	var wcnt = len(wordsUnfixed)
+	digests := make([][]sha256.Sha256Digest, len(grammar)-1)
+	var wcnt = len(grammar)
 	for {
 		newWords := false
 		for w := wcnt - 1 - carries; w < wcnt; w++ {
-			currWords := wordsUnfixed[w]
+			currWords := grammar[w]
 			if w < wcnt-1 {
 				digests[w] = make([]sha256.Sha256Digest, len(currWords))
 			}
@@ -125,30 +143,29 @@ func methodB(words [][]string, cutoff [32]byte, batch int) {
 				}
 				if w < wcnt-1 {
 					digests[w][d] = *currentDigest
-					digests[w][d].Write(wordsUnfixed[w][d])
+					digests[w][d].Write(grammar[w][d])
 				} else {
 					cd := *currentDigest
-					cd.Write(wordsUnfixed[w][d])
+					cd.Write(grammar[w][d])
 					hash = cd.CheckSum()
 
 					if leftLess(hash, cutoff) {
-						s := selectedWordsToStr(selWords, d, wordsUnfixed)
+						s := grammar.Str(selWords, d)
 						fmt.Printf("potential found %s\n", s)
-						cutoff = postB(s, cutoff)
+						cutoff = post(s, cutoff)
 						newWords = true
 					}
 					i = i + 1
-
 				}
 			}
 
 		}
 		if newWords {
-			selWords = genRands(wordsUnfixed)
+			selWords = genRands(grammar)
 			carries = len(selWords)
-			fmt.Printf("Jump to new random sentence:\n%q\n\n", selectedWordsToStr(selWords, 0, wordsUnfixed))
+			fmt.Printf("Jump to:\n%q\n\n", grammar.Str(selWords, 0))
 		} else {
-			carries = addOneB(selWords, wordsUnfixed)
+			carries = addOneB(selWords, grammar)
 		}
 
 		if i > batch {
@@ -160,7 +177,7 @@ func methodB(words [][]string, cutoff [32]byte, batch int) {
 			i = 0
 
 			if b%10 == 0 {
-				fmt.Printf("current position: %q\n", selectedWordsToStr(selWords, 0, wordsUnfixed))
+				fmt.Printf("current position: %q\n", grammar.Str(selWords, 0))
 			}
 			b = b + 1
 		}
@@ -169,63 +186,12 @@ func methodB(words [][]string, cutoff [32]byte, batch int) {
 
 }
 
-func methodA(cutoff [32]byte, batch int) {
-	start := time.Now()
-	var err error
-	var arr [256]byte
-	var rands [8]int
-	n := 0
-	rands = genEightRands()
-	arr, n = randSentenceFixedArrFasterRands(rands)
-	var xx sha256.Sha256Digest
-	digest := &xx
-	digest.Reset()
-	var hash [32]byte
-	for i := 0; true; i++ {
-
-		if rands[7] == 0 {
-			arr, n = randSentenceFixedArrFasterRands(rands)
-			digest.Reset()
-			digest.Write(arr[:n])
-
-		}
-
-		// make a copy of the digest
-		d0 := *digest
-		d0.Write(wordsFixed[7][rands[7]])
-		hash = d0.CheckSum()
-
-		if leftLess(hash, cutoff) {
-
-			cutoff, err = post(string(arr[:n])+string(wordsFixed[7][rands[7]]), cutoff)
-			if err != nil {
-				fmt.Println("Quitting, err " + err.Error())
-				return
-			}
-		}
-		rands = addOne(rands)
-		if i > batch {
-
-			hashesPerSecond := float64(batch) / (float64(time.Since(start).Nanoseconds()) / float64(1000000000))
-			start = time.Now()
-			fmt.Printf("%dk hashes per second \n", int64(hashesPerSecond/1000))
-
-			// avoid an int overflow
-			i = 0
-			// get fresh rands
-			rands = genEightRands()
-			rands[7] = 0
-		}
-	}
-}
-
 func leftLess(a, b [32]byte) bool {
 	for i := 0; i < len(a); i++ {
 		if a[i] < b[i] {
 			return true
 		} else if a[i] > b[i] {
 			return false
-
 		}
 	}
 	return false
@@ -235,28 +201,9 @@ var cutoffRegex, _ = regexp.Compile(".*cutoff: (.*)")
 var msgRegex, _ = regexp.Compile(".*msg: (.*)")
 var rankRegex, _ = regexp.Compile(".*rank: (.*)")
 
-func selectedWordsToStr(selectedWords []int, lastWord int, wordsUnfixed [][][]byte) string {
-	//xs := append(selectedWords, lastWord)
-	s := ""
-	for i := 0; i < len(selectedWords); i++ {
-		s += string(wordsUnfixed[i][selectedWords[i]])
-	}
-	s += string(wordsUnfixed[len(selectedWords)][lastWord])
-	return s
-}
+func post(s string, cutoff [32]byte) (newCutoff [32]byte) {
 
-func postB(s string, cutoff [32]byte) (newCuttoff [32]byte) {
-
-	newCuttoff, err := post(s, cutoff)
-	if err != nil {
-		fmt.Print("error while posting: %s\n", err.Error())
-	}
-	return
-}
-
-func post(s string, atleast [32]byte) (atleastOut [32]byte, fail error) {
-
-	atleastOut = atleast
+	newCutoff = cutoff
 	form := url.Values{}
 	form.Add("msg", s)
 	sageURL := "https://lowhash.com"
@@ -287,34 +234,36 @@ func post(s string, atleast [32]byte) (atleastOut [32]byte, fail error) {
 		if resp.StatusCode == http.StatusOK {
 			bodyBytes, err2 := ioutil.ReadAll(resp.Body)
 			if err2 != nil {
-				fmt.Println("err")
-				return
-			}
-			bodyString := string(bodyBytes)
-			if strings.HasPrefix(bodyString, "\nhash does not rank") {
-				a := cutoffRegex.FindStringSubmatch(bodyString)[1]
-				atleastOut = stringToHexBytes(a)
-				fmt.Println("Set cutoff to " + a[0:8] + " " + a[8:16])
-			} else if strings.HasPrefix(bodyString, "\nrank: ") {
-				b := cutoffRegex.FindStringSubmatch(bodyString)[1]
-				atleastOut = stringToHexBytes(b)
-				rank := rankRegex.FindStringSubmatch(bodyString)[1]
-				msg := msgRegex.FindStringSubmatch(bodyString)[1]
-				fmt.Println("Excellent! You placed " + rank + " with: \"" + msg + "\"")
-				fmt.Println(" Update cutoff to " + b[0:8] + " " + b[8:16])
-			} else if strings.HasPrefix(bodyString, "\nalready present") {
-				c := cutoffRegex.FindStringSubmatch(bodyString)[1]
-				atleastOut = stringToHexBytes(c)
-				fmt.Println("Set cutoff to " + c[0:8] + " " + c[8:16])
-			} else {
-				fmt.Print("unknown response")
-				fmt.Print(bodyString)
-			}
+				fmt.Printf("err reading response: %s\n", err2)
 
+			} else {
+				bodyString := string(bodyBytes)
+				if strings.HasPrefix(bodyString, "\nhash does not rank") {
+					a := cutoffRegex.FindStringSubmatch(bodyString)[1]
+					newCutoff = stringToHexBytes(a)
+					fmt.Println("Set cutoff to " + a[0:8] + " " + a[8:16])
+				} else if strings.HasPrefix(bodyString, "\nrank: ") {
+					b := cutoffRegex.FindStringSubmatch(bodyString)[1]
+					newCutoff = stringToHexBytes(b)
+					rank := rankRegex.FindStringSubmatch(bodyString)[1]
+					msg := msgRegex.FindStringSubmatch(bodyString)[1]
+					fmt.Println("Excellent! You placed " + rank + " with: \"" + msg + "\"")
+					fmt.Println(" Update cutoff to " + b[0:8] + " " + b[8:16])
+				} else if strings.HasPrefix(bodyString, "\nalready present") {
+					c := cutoffRegex.FindStringSubmatch(bodyString)[1]
+					newCutoff = stringToHexBytes(c)
+					fmt.Println("Set cutoff to " + c[0:8] + " " + c[8:16])
+				} else {
+					fmt.Print("unknown response")
+					fmt.Print(bodyString)
+				}
+			}
 		} else {
 			fmt.Printf("status code %v\n", resp.StatusCode)
-			fail = fmt.Errorf("%d", resp.StatusCode)
-
+			fail := fmt.Errorf("%d", resp.StatusCode)
+			if fail != nil {
+				fmt.Printf("error while posting: %s\n", err.Error())
+			}
 		}
 	}
 	return
@@ -327,49 +276,12 @@ func stringToHexBytes(s string) (dout [32]byte) {
 	return dout
 }
 
-var spaceByte = []byte(" ")[0]
-
-const sixtyfourToEigth int64 = 281474976710656
-
-func genEightRands() (r [8]int) {
-	var x = rand.Int63n(sixtyfourToEigth)
-	r[0] = int(x & 0x3F)
-	x = x >> 5
-	r[1] = int(x & 0x3F)
-	x = x >> 5
-	r[2] = int(x & 0x3F)
-	x = x >> 5
-	r[3] = int(x & 0x3F)
-	x = x >> 5
-	r[4] = int(x & 0x3F)
-	x = x >> 5
-	r[5] = int(x & 0x3F)
-	x = x >> 5
-	r[6] = int(x & 0x3F)
-	x = x >> 5
-	r[7] = int(x & 0x3F)
-	return
-}
-
 func genRands(wordsUnfixed [][][]byte) (r []int) {
 	r = make([]int, len(wordsUnfixed)-1)
 	for w := 0; w < len(wordsUnfixed)-1; w++ {
 		r[w] = rand.Intn(len(wordsUnfixed[w]))
 	}
 	return
-}
-
-func addOne(randIn [8]int) [8]int {
-
-	for pos := 7; pos >= 0; pos = pos - 1 {
-		randIn[pos] = randIn[pos] + 1
-		if randIn[pos] >= len(words[pos]) {
-			randIn[pos] = 0
-		} else {
-			return randIn
-		}
-	}
-	return randIn
 }
 
 func addOneB(selWords []int, wordsUnfixed [][][]byte) (carries int) {
@@ -386,27 +298,8 @@ func addOneB(selWords []int, wordsUnfixed [][][]byte) (carries int) {
 	return
 }
 
-func randSentenceFixedArrFasterRands(eightRands [8]int) (arr [256]byte, n int) {
-	n = 0
-
-	for i := 0; i < len(wordsFixed)-1; i++ {
-		r := eightRands[i]
-
-		for k := 0; k < len(wordsFixed[i][r]); k++ {
-			arr[n+k] = wordsFixed[i][r][k]
-		}
-
-		n += len(wordsFixed[i][r])
-	}
-
-	return arr, n
-}
-
-//var sha =  nativeSha.New() //wmSha.New256()
-
 func init() {
 	rand.Seed(time.Now().Unix())
-
 }
 
 // readLines reads a whole file into memory
@@ -431,7 +324,7 @@ func readLines(path string) ([][]string, error) {
 	return lines, scanner.Err()
 }
 
-var words = [][]string{{
+var defaultWords = [][]string{{
 	"Capture", "Dispense", "Eject", "Imagine", "Be", "Do", "Have", "Become", "Once", "If", "Imagine if", "Suppose that",
 	"I know", "Don't fear", "Because", "Therefore", "As though", "We think", "I believe", "You hope"},
 	{" "},
@@ -474,40 +367,7 @@ var words = [][]string{{
 	{".", "?", "!", ""},
 }
 
-var wordsFixed [8][64][]byte
-
-func initWordsFixed(prefix, postfix string) {
-	i := 0
-	curr := words[i]
-
-	for j := 0; j < 64; j++ {
-		word := curr[j%len(curr)]
-
-		wordsFixed[i][j] = []byte(prefix + word)
-	}
-
-	for i = 1; i < 7; i++ {
-		curr = words[i]
-
-		for j := 0; j < 64; j++ {
-			word := curr[j%len(curr)]
-
-			wordsFixed[i][j] = []byte(word)
-		}
-	}
-
-	i = 7
-	curr = words[i]
-
-	for j := 0; j < 64; j++ {
-		word := curr[j%len(curr)]
-
-		wordsFixed[i][j] = []byte(word + postfix)
-	}
-
-}
-
-func initWordsUnfixed(wordPositions [][]string) (wordPositionsBytes [][][]byte) {
+func strsToByte(wordPositions [][]string) (wordPositionsBytes [][][]byte) {
 	wordPositionsBytes = make([][][]byte, len(wordPositions))
 	for i := 0; i < len(wordPositions); i++ {
 		curr := wordPositions[i]
