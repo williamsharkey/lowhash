@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	//nativeSha "crypto/sha256"
 	"github.com/williamsharkey/sha256-simd"
 	//"github.com/minio/sha256-simd"
@@ -53,11 +54,50 @@ func main() {
 
 	x := append(append([][]string{{prefix}}, words...), []string{postfix})
 	methodB(x, cutoff, batch)
+	//methodA(cutoff,batch)
+}
+
+func printCombos(words [][]string) {
+	combos := 1
+	for i := 0; i < len(words); i++ {
+		combos = combos * len(words[i])
+	}
+	fmt.Printf("There are %d possible sententces\n", combos)
+}
+
+func printTreeBreadth(words [][]string) {
+	s := ""
+	for i := 0; i < len(words)-1; i++ {
+		s += fmt.Sprintf("%d, ", len(words[i]))
+	}
+	s += fmt.Sprintf("%d", len(words[len(words)-1]))
+
+	fmt.Printf("Tree Breadth: [%s]\n", s)
 }
 
 func methodB(words [][]string, cutoff [32]byte, batch int) {
 	start := time.Now()
-	wordsUnfixed := initWordsUnfixed(combineWords(words))
+	grammar := words
+	custom, errRead := readLines("lowhash.txt")
+	if errRead == nil {
+		grammar = custom
+	}
+
+	printCombos(grammar)
+	combinedWords := combineWords(grammar)
+
+	preserveEnd := 3
+	if len(combinedWords) >= preserveEnd {
+		front := combinedWords[:len(combinedWords)-preserveEnd]
+		back := combinedWords[len(combinedWords)-preserveEnd:]
+		frontWide := widenTree(front, 1024*128)
+		backWide := widenTree(back, 0)
+		recombinedTree := append(frontWide, backWide...)
+		combinedWords = recombinedTree
+	}
+
+	printTreeBreadth(combinedWords)
+	wordsUnfixed := initWordsUnfixed(combinedWords)
 	i := 0
 	b := 0
 	selWords := genRands(wordsUnfixed)
@@ -369,6 +409,28 @@ func init() {
 
 }
 
+// readLines reads a whole file into memory
+// and returns a slice of its lines.
+func readLines(path string) ([][]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var lines [][]string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		f := strings.Fields(scanner.Text())
+
+		for i := 0; i < len(f); i++ {
+			f[i] = strings.Replace(f[i], "_", " ", -1)
+		}
+		lines = append(lines, f)
+	}
+	return lines, scanner.Err()
+}
+
 var words = [][]string{{
 	"Capture", "Dispense", "Eject", "Imagine", "Be", "Do", "Have", "Become", "Once", "If", "Imagine if", "Suppose that",
 	"I know", "Don't fear", "Because", "Therefore", "As though", "We think", "I believe", "You hope"},
@@ -477,10 +539,56 @@ func combineWords(ws [][]string) [][]string {
 	}
 	// postfix final entries
 	if last != "" {
-		for j := 0; j < len(c[len(c)-1]); j++ {
-			c[len(c)-1][j] = c[len(c)-1][j] + last
+		if len(c) > 0 {
+			for j := 0; j < len(c[len(c)-1]); j++ {
+				c[len(c)-1][j] = c[len(c)-1][j] + last
+			}
+		} else {
+			c = append(c, []string{last})
+		}
+	}
+	return c
+}
+
+func widenTree(ws [][]string, maxWidth int) [][]string {
+	if len(ws) < 2 {
+		return ws
+	}
+
+	min := len(ws[0]) * len(ws[1])
+	minI := 0
+	for i := 1; i < len(ws)-1; i++ {
+		curr := len(ws[i]) * len(ws[i+1])
+		if curr < min {
+			min = curr
+			minI = i
 		}
 	}
 
-	return c
+	if min > maxWidth {
+		return ws
+	}
+	outArr := make([][]string, len(ws)-1)
+	for i := 0; i < minI; i++ {
+		outArr[i] = make([]string, len(ws[i]))
+		for j := 0; j < len(ws[i]); j++ {
+			outArr[i][j] = ws[i][j]
+		}
+	}
+
+	outArr[minI] = make([]string, min)
+	for i := 0; i < len(ws[minI]); i++ {
+		for j := 0; j < len(ws[minI+1]); j++ {
+			outArr[minI][j+i*(len(ws[minI+1]))] = ws[minI][i] + ws[minI+1][j]
+		}
+	}
+
+	for i := minI + 1; i < len(outArr); i++ {
+		outArr[i] = make([]string, len(ws[i+1]))
+		for j := 0; j < len(ws[i+1]); j++ {
+			outArr[i][j] = ws[i+1][j]
+		}
+	}
+	return widenTree(outArr, maxWidth)
+
 }
