@@ -9,15 +9,15 @@ See the current 256 lowest strings at https://lowhash.com
 
   Download a compiled executable for your system:
   
-  - Windows 64bit
-  - MacOS
-  - Linux
+  - Windows [64bit](https://lowhash.com/build/win64/lowhash.exe) [32bit](https://lowhash.com/build/win32/lowhash.exe)  
+  - macOS   [64bit](https://lowhash.com/build/osx64/lowhash) [32bit](https://lowhash.com/build/osx32/lowhash)
+  - Linux   [64bit](https://lowhash.com/build/linux64/lowhash) [32bit](https://lowhash.com/build/linux32/lowhash)
   
  ##Build from Source
   
   If you want to build it yourself:
   
-  - you need the Go compiler, see [https://golang.org]
+  - you need the Go compiler, see https://golang.org
   - run: `go get github.com/williamsharkey/lowhash`
   - change directory to $GOPATH/scr/github.com/williamsharkey/lowhash/
   - `go build`
