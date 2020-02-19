@@ -161,14 +161,6 @@ func digestTree(grammar Grammar, batch int) {
 			}
 
 		}
-		if newWords {
-			selWords = genRands(grammar)
-			carries = len(selWords)
-			fmt.Printf("Jump to:\n%q\n\n", grammar.Str(selWords, 0))
-		} else {
-			carries = addOneB(selWords, grammar)
-		}
-
 		if i > batch {
 			hashesPerSecond := float64(i) / (float64(time.Since(start).Nanoseconds()) / float64(1000000000))
 			start = time.Now()
@@ -181,6 +173,15 @@ func digestTree(grammar Grammar, batch int) {
 				fmt.Printf("current position: %q\n", grammar.Str(selWords, 0))
 			}
 			b = b + 1
+			newWords = true
+		}
+
+		if newWords {
+			selWords = genRands(grammar)
+			carries = len(selWords)
+			fmt.Printf("Jump to:\n%q\n\n", grammar.Str(selWords, 0))
+		} else {
+			carries = addOneB(selWords, grammar)
 		}
 
 	}
