@@ -124,7 +124,7 @@ func digestTree(grammar Grammar, batch int) {
 	fmt.Printf("Start search with:\n%q\n\n", initStr)
 	var emptyDigest sha256.Sha256Digest
 	emptyDigest.Reset()
-	var hash [32]byte
+
 	digests := make([]sha256.Sha256Digest, len(grammar)-1)
 	var wcnt = len(grammar)
 	for {
@@ -147,11 +147,12 @@ func digestTree(grammar Grammar, batch int) {
 
 					cd := *currentDigest
 					cd.Write(grammar[w][j])
-					hash = cd.CheckSum()
 
-					if leftLess(hash, cutoff) {
+					if cd.CheckSumLessThanOrEqual(cutoff) {
 						s := grammar.Str(selWords, j)
 						fmt.Printf("potential found %s\n", s)
+						//print title
+						fmt.Printf("\033]0;%q\007", s)
 						cutoff = post(s, cutoff)
 						newWords = true
 					}
