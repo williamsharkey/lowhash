@@ -82,11 +82,11 @@ func generateWords(defaultGrammar [][]string, prefix, postfix string) Grammar {
 	printCombos(grammar)
 	combinedWords := combineWords(grammar)
 
-	preserveEnd := 3
+	preserveEnd := 1
 	if len(combinedWords) >= preserveEnd {
 		front := combinedWords[:len(combinedWords)-preserveEnd]
 		back := combinedWords[len(combinedWords)-preserveEnd:]
-		frontWide := widenTree(front, 1024*128)
+		frontWide := widenTree(front, 0) //1024*128)
 		backWide := widenTree(back, 0)
 		recombinedTree := append(frontWide, backWide...)
 
@@ -104,11 +104,11 @@ func generateWords(defaultGrammar [][]string, prefix, postfix string) Grammar {
 type Grammar [][][]byte
 
 func (g Grammar) Str(selWords []int, lastWord int) string {
+	a := append(selWords, lastWord)
 	s := ""
-	for i := 0; i < len(selWords); i++ {
-		s += string(g[i][selWords[i]])
+	for i := 0; i < len(a); i++ {
+		s += string(g[i][a[i]])
 	}
-	s += string(g[len(selWords)][lastWord])
 	return s
 }
 
@@ -125,32 +125,32 @@ func digestTree(grammar Grammar, batch int) {
 	var emptyDigest sha256.Sha256Digest
 	emptyDigest.Reset()
 	var hash [32]byte
-	digests := make([][]sha256.Sha256Digest, len(grammar)-1)
+	digests := make([]sha256.Sha256Digest, len(grammar)-1)
 	var wcnt = len(grammar)
 	for {
 		newWords := false
 		for w := wcnt - 1 - carries; w < wcnt; w++ {
-			currWords := grammar[w]
-			if w < wcnt-1 {
-				digests[w] = make([]sha256.Sha256Digest, len(currWords))
+
+			var currentDigest *sha256.Sha256Digest
+			if w == 0 {
+				currentDigest = &emptyDigest
+			} else {
+				currentDigest = &digests[w-1]
 			}
-			for d := 0; d < len(currWords); d++ {
-				var currentDigest *sha256.Sha256Digest
-				if w == 0 {
-					currentDigest = &emptyDigest
-				} else {
-					currentDigest = &digests[w-1][selWords[w-1]]
-				}
-				if w < wcnt-1 {
-					digests[w][d] = *currentDigest
-					digests[w][d].Write(grammar[w][d])
-				} else {
+			if w < wcnt-1 {
+				digests[w] = *currentDigest
+				digests[w].Write(grammar[w][selWords[w]])
+
+			} else {
+
+				for j := 0; j < len(grammar[w]); j++ {
+
 					cd := *currentDigest
-					cd.Write(grammar[w][d])
+					cd.Write(grammar[w][j])
 					hash = cd.CheckSum()
 
 					if leftLess(hash, cutoff) {
-						s := grammar.Str(selWords, d)
+						s := grammar.Str(selWords, j)
 						fmt.Printf("potential found %s\n", s)
 						cutoff = post(s, cutoff)
 						newWords = true
