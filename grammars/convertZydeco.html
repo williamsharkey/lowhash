@@ -1,0 +1,101 @@
+<html>
+<body>
+	<head>
+	<style>textarea{ white-space: pre; font-family: monospace; }</style>
+</head>
+<script>
+
+ let configUrl = "https://raw.githubusercontent.com/crosshj/experiments/7aeb6de977bc04af462aac7dde50e06d53cef815/bartok/.welcome/1ncubate/zydeco.config.json";
+
+
+function parseConfig(configText){
+	const config = {};
+	const lines = configText.split('\n');
+	
+	let currentList;
+	lines.forEach(line => {
+		if(!line) return;
+		if(line.trim().indexOf('/*') === 0) return;
+		if(line.trim().indexOf('//') === 0) return;
+		
+		if(line.includes('###')){
+			currentList = line.split('###')[1].trim()
+			return;
+		}
+		if(!currentList) {
+			return;
+		}
+		if(line.includes('=')){
+			config[currentList] = config[currentList] || {};
+			const [prop, value] = line.split('=');
+			if(['bg_colors', 'speech_parts', 'sources'].includes(prop)){
+				config[currentList][prop] = value.split(',')
+				return;
+			}
+			if(prop.indexOf('template') === 0){
+				config[currentList].templates = config[currentList].templates || [];
+				config[currentList].templates.push(value);
+				return;
+			}
+			config[currentList][prop] = value
+			return;
+		} else {
+			config[currentList] = config[currentList] || [];
+			config[currentList].push(line);
+			return;
+		}
+	})
+
+	config['period']=["."];
+	config['comma']=[", "];
+	
+	for (template of config.zydeco_bones_v1.templates) {
+		var lowhashGrammar = "";
+		for (var part of template.split(" ")){
+			lowhashGrammar+= config[part].filter(x=>x.trim()!=="").map(p=>p.replace(/\ /g,"_")).join(" ")+String.fromCharCode(13, 10);
+			lowhashGrammar+= "_"+String.fromCharCode(13, 10);
+		}
+
+		var ta = document.createElement("textarea");
+		ta.innerHTML=lowhashGrammar;
+
+		 document.body.appendChild(ta);
+
+	}
+}
+
+
+
+function randItem(items){
+	var item = items[Math.floor(Math.random() * items.length)];
+	return item;
+}
+
+function getPoem(config){
+	let thepoem = '';
+	let { templates } = config['zydeco_bones_v1'];
+	const template = templates[0];
+	template.split(' ').forEach(part => {
+		if(part === 'comma'){
+			thepoem = thepoem.trim();
+			thepoem += ',\n';
+			return;
+		}
+		if(part === 'period'){
+			thepoem = thepoem.trim();
+			thepoem += '.  ';
+			return;
+		}
+		thepoem += randItem(config[part]) + ' ';
+	})
+	return thepoem;
+}
+
+fetch(configUrl)
+.then(x => x.text())
+.then(parseConfig);
+
+
+</script>
+</body>
+</html>
